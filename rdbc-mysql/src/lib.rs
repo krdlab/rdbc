@@ -18,9 +18,11 @@
 //! ```
 
 use mysql as my;
+use mysql::prelude::Queryable;
 use mysql_common::constants::ColumnType;
 
 use sqlparser::dialect::MySqlDialect;
+use sqlparser::keywords::Keyword;
 use sqlparser::tokenizer::{Token, Tokenizer, Word};
 
 /// Convert a MySQL error into an RDBC error
@@ -60,9 +62,12 @@ impl rdbc::Connection for MySQLConnection {
         }))
     }
 
-    fn prepare<'a>(&'a mut self, sql: &str) -> rdbc::Result<Box<dyn rdbc::Statement + '_>> {
-        let stmt = self.conn.prepare(&sql).map_err(to_rdbc_err)?;
-        Ok(Box::new(MySQLPreparedStatement { stmt }))
+    fn prepare(&mut self, sql: &str) -> rdbc::Result<Box<dyn rdbc::Statement + '_>> {
+        let stmt = self.conn.prep(&sql).map_err(to_rdbc_err)?;
+        Ok(Box::new(MySQLPreparedStatement {
+            conn: &mut self.conn,
+            stmt,
+        }))
     }
 }
 
@@ -76,22 +81,24 @@ impl<'a> rdbc::Statement for MySQLStatement<'a> {
         &mut self,
         params: &[rdbc::Value],
     ) -> rdbc::Result<Box<dyn rdbc::ResultSet + '_>> {
-        let sql = rewrite(&self.sql, params)?;
-        let result = self.conn.query(&sql).map_err(to_rdbc_err)?;
+        let result = self
+            .conn
+            .exec_iter(&self.sql, to_my_params(params))
+            .map_err(to_rdbc_err)?;
         Ok(Box::new(MySQLResultSet { result, row: None }))
     }
 
     fn execute_update(&mut self, params: &[rdbc::Value]) -> rdbc::Result<u64> {
-        let sql = rewrite(&self.sql, params)?;
         self.conn
-            .query(&sql)
+            .exec_iter(&self.sql, to_my_params(params))
             .map_err(to_rdbc_err)
             .map(|result| result.affected_rows())
     }
 }
 
 struct MySQLPreparedStatement<'a> {
-    stmt: my::Stmt<'a>,
+    conn: &'a mut my::Conn,
+    stmt: my::Statement,
 }
 
 impl<'a> rdbc::Statement for MySQLPreparedStatement<'a> {
@@ -100,23 +107,23 @@ impl<'a> rdbc::Statement for MySQLPreparedStatement<'a> {
         params: &[rdbc::Value],
     ) -> rdbc::Result<Box<dyn rdbc::ResultSet + '_>> {
         let result = self
-            .stmt
-            .execute(to_my_params(params))
+            .conn
+            .exec_iter(&self.stmt, to_my_params(params))
             .map_err(to_rdbc_err)?;
 
         Ok(Box::new(MySQLResultSet { result, row: None }))
     }
 
     fn execute_update(&mut self, params: &[rdbc::Value]) -> rdbc::Result<u64> {
-        self.stmt
-            .execute(to_my_params(params))
+        self.conn
+            .exec_iter(&self.stmt, to_my_params(params))
             .map_err(to_rdbc_err)
             .map(|result| result.affected_rows())
     }
 }
 
-pub struct MySQLResultSet<'a> {
-    result: my::QueryResult<'a>,
+pub struct MySQLResultSet<'a, 't, 'tc, T: my::prelude::Protocol> {
+    result: my::QueryResult<'a, 't, 'tc, T>,
     row: Option<my::Result<my::Row>>,
 }
 
@@ -137,11 +144,12 @@ macro_rules! impl_resultset_fns {
     }
 }
 
-impl<'a> rdbc::ResultSet for MySQLResultSet<'a> {
+impl<'a, 't, 'tc, T: my::prelude::Protocol> rdbc::ResultSet for MySQLResultSet<'a, 't, 'tc, T> {
     fn meta_data(&self) -> rdbc::Result<Box<dyn rdbc::ResultSetMetaData>> {
         let meta: Vec<rdbc::Column> = self
             .result
-            .columns_ref()
+            .columns()
+            .as_ref()
             .iter()
             .map(|c| rdbc::Column::new(&c.name_str(), to_rdbc_type(&c.column_type())))
             .collect();
@@ -222,7 +230,7 @@ fn rewrite(sql: &str, params: &[rdbc::Value]) -> rdbc::Result<String> {
                         Token::Word(Word {
                             value: param.to_string(),
                             quote_style: None,
-                            keyword: "".to_owned(),
+                            keyword: Keyword::NoKeyword,
                         })
                     }
                     _ => t.clone(),

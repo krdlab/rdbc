@@ -17,10 +17,11 @@
 //! }
 //! ```
 
-use postgres::rows::Rows;
-use postgres::{Connection, TlsMode};
+use postgres::row::Row;
+use postgres::{Client, NoTls};
 
 use sqlparser::dialect::PostgreSqlDialect;
+use sqlparser::keywords::Keyword;
 use sqlparser::tokenizer::{Token, Tokenizer, Word};
 
 use postgres::types::Type;
@@ -36,17 +37,17 @@ impl PostgresDriver {
 
 impl rdbc::Driver for PostgresDriver {
     fn connect(&self, url: &str) -> rdbc::Result<Box<dyn rdbc::Connection>> {
-        let c = postgres::Connection::connect(url, TlsMode::None).map_err(to_rdbc_err)?;
+        let c = postgres::Client::connect(url, NoTls).map_err(to_rdbc_err)?;
         Ok(Box::new(PConnection::new(c)))
     }
 }
 
 struct PConnection {
-    conn: Connection,
+    conn: Client,
 }
 
 impl PConnection {
-    pub fn new(conn: Connection) -> Self {
+    pub fn new(conn: Client) -> Self {
         Self { conn }
     }
 }
@@ -70,7 +71,7 @@ impl rdbc::Connection for PConnection {
                     Token::Word(Word {
                         value: format!("${}", i),
                         quote_style: None,
-                        keyword: "".to_owned(),
+                        keyword: Keyword::NoKeyword,
                     })
                 }
                 _ => t.clone(),
@@ -83,14 +84,14 @@ impl rdbc::Connection for PConnection {
             .join("");
 
         Ok(Box::new(PStatement {
-            conn: &self.conn,
+            conn: &mut self.conn,
             sql,
         }))
     }
 }
 
 struct PStatement<'a> {
-    conn: &'a Connection,
+    conn: &'a mut Client,
     sql: String,
 }
 
@@ -100,23 +101,29 @@ impl<'a> rdbc::Statement for PStatement<'a> {
         params: &[rdbc::Value],
     ) -> rdbc::Result<Box<dyn rdbc::ResultSet + '_>> {
         let params = to_postgres_value(params);
-        let params: Vec<&dyn postgres::types::ToSql> = params.iter().map(|v| v.as_ref()).collect();
+        let params: Vec<&(dyn postgres::types::ToSql + Sync)> =
+            params.iter().map(|v| v.as_ref()).collect();
         let rows = self
             .conn
             .query(&self.sql, params.as_slice())
             .map_err(to_rdbc_err)?;
         let meta = rows
-            .columns()
-            .iter()
-            .map(|c| rdbc::Column::new(c.name(), to_rdbc_type(c.type_())))
-            .collect();
+            .first()
+            .map(|r| {
+                r.columns()
+                    .iter()
+                    .map(|c| rdbc::Column::new(c.name(), to_rdbc_type(c.type_())))
+                    .collect()
+            })
+            .unwrap();
 
         Ok(Box::new(PResultSet { meta, i: 0, rows }))
     }
 
     fn execute_update(&mut self, params: &[rdbc::Value]) -> rdbc::Result<u64> {
         let params = to_postgres_value(params);
-        let params: Vec<&dyn postgres::types::ToSql> = params.iter().map(|v| v.as_ref()).collect();
+        let params: Vec<&(dyn postgres::types::ToSql + Sync)> =
+            params.iter().map(|v| v.as_ref()).collect();
         self.conn
             .execute(&self.sql, params.as_slice())
             .map_err(to_rdbc_err)
@@ -126,14 +133,14 @@ impl<'a> rdbc::Statement for PStatement<'a> {
 struct PResultSet {
     meta: Vec<Column>,
     i: usize,
-    rows: Rows,
+    rows: Vec<Row>,
 }
 
 macro_rules! impl_resultset_fns {
     ($($fn: ident -> $ty: ty),*) => {
         $(
             fn $fn(&self, i: u64) -> rdbc::Result<Option<$ty>> {
-                Ok(self.rows.get(self.i - 1).get(i as usize))
+                Ok(self.rows.get(self.i - 1).map(|r| r.get(i as usize)))
             }
         )*
     }
@@ -178,13 +185,13 @@ fn to_rdbc_type(ty: &Type) -> rdbc::DataType {
     }
 }
 
-fn to_postgres_value(values: &[rdbc::Value]) -> Vec<Box<dyn postgres::types::ToSql>> {
+fn to_postgres_value(values: &[rdbc::Value]) -> Vec<Box<dyn postgres::types::ToSql + Sync>> {
     values
         .iter()
         .map(|v| match v {
-            rdbc::Value::String(s) => Box::new(s.clone()) as Box<dyn postgres::types::ToSql>,
-            rdbc::Value::Int32(n) => Box::new(*n) as Box<dyn postgres::types::ToSql>,
-            rdbc::Value::UInt32(n) => Box::new(*n) as Box<dyn postgres::types::ToSql>,
+            rdbc::Value::String(s) => Box::new(s.clone()) as Box<dyn postgres::types::ToSql + Sync>,
+            rdbc::Value::Int32(n) => Box::new(*n) as Box<dyn postgres::types::ToSql + Sync>,
+            rdbc::Value::UInt32(n) => Box::new(*n) as Box<dyn postgres::types::ToSql + Sync>,
             //TODO all types
         })
         .collect()
