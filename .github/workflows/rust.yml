@@ -1,19 +1,26 @@
-name: Rust
+name: Rust CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '*.md'
+  pull_request:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v1
-    - name: Start database servers
-      run: docker-compose up -d
+    - uses: actions/checkout@v3
+
     - name: Check formatting
       run: cargo fmt --all -- --check
     - name: Build
       run: cargo build
+
+    - name: Start database servers
+      run: docker-compose up -d
     - name: Run tests
       run: cargo test
