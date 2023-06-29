@@ -18,10 +18,8 @@
 //! ```
 
 use mysql as my;
+use mysql::prelude::Queryable;
 use mysql_common::constants::ColumnType;
-
-use sqlparser::dialect::MySqlDialect;
-use sqlparser::tokenizer::{Token, Tokenizer, Word};
 
 /// Convert a MySQL error into an RDBC error
 fn to_rdbc_err(e: my::error::Error) -> rdbc::Error {
@@ -61,62 +59,67 @@ impl rdbc::Connection for MySQLConnection {
     }
 
     fn prepare<'a>(&'a mut self, sql: &str) -> rdbc::Result<Box<dyn rdbc::Statement + '_>> {
-        let stmt = self.conn.prepare(&sql).map_err(to_rdbc_err)?;
-        Ok(Box::new(MySQLPreparedStatement { stmt }))
+        let stmt = self.conn.prep(&sql).map_err(to_rdbc_err)?;
+        Ok(Box::new(MySQLPreparedStatement {
+            conn: &mut self.conn,
+            stmt,
+        }))
     }
 }
 
-struct MySQLStatement<'a> {
-    conn: &'a mut my::Conn,
+struct MySQLStatement<'c> {
+    conn: &'c mut my::Conn,
     sql: String,
 }
 
-impl<'a> rdbc::Statement for MySQLStatement<'a> {
-    fn execute_query(
-        &mut self,
-        params: &[rdbc::Value],
-    ) -> rdbc::Result<Box<dyn rdbc::ResultSet + '_>> {
-        let sql = rewrite(&self.sql, params)?;
-        let result = self.conn.query(&sql).map_err(to_rdbc_err)?;
-        Ok(Box::new(MySQLResultSet { result, row: None }))
-    }
-
-    fn execute_update(&mut self, params: &[rdbc::Value]) -> rdbc::Result<u64> {
-        let sql = rewrite(&self.sql, params)?;
-        self.conn
-            .query(&sql)
-            .map_err(to_rdbc_err)
-            .map(|result| result.affected_rows())
-    }
-}
-
-struct MySQLPreparedStatement<'a> {
-    stmt: my::Stmt<'a>,
-}
-
-impl<'a> rdbc::Statement for MySQLPreparedStatement<'a> {
+impl<'c> rdbc::Statement for MySQLStatement<'c> {
     fn execute_query(
         &mut self,
         params: &[rdbc::Value],
     ) -> rdbc::Result<Box<dyn rdbc::ResultSet + '_>> {
         let result = self
-            .stmt
-            .execute(to_my_params(params))
+            .conn
+            .exec_iter(&self.sql, to_my_params(params))
+            .map_err(to_rdbc_err)?;
+        Ok(Box::new(MySQLResultSet { result, row: None }))
+    }
+
+    fn execute_update(&mut self, params: &[rdbc::Value]) -> rdbc::Result<u64> {
+        self.conn
+            .exec_iter(&self.sql, to_my_params(params))
+            .map_err(to_rdbc_err)
+            .map(|result| result.affected_rows())
+    }
+}
+
+struct MySQLPreparedStatement<'c> {
+    conn: &'c mut my::Conn,
+    stmt: my::Statement,
+}
+
+impl<'c> rdbc::Statement for MySQLPreparedStatement<'c> {
+    fn execute_query(
+        &mut self,
+        params: &[rdbc::Value],
+    ) -> rdbc::Result<Box<dyn rdbc::ResultSet + '_>> {
+        let result = self
+            .conn
+            .exec_iter(&self.stmt, to_my_params(params))
             .map_err(to_rdbc_err)?;
 
         Ok(Box::new(MySQLResultSet { result, row: None }))
     }
 
     fn execute_update(&mut self, params: &[rdbc::Value]) -> rdbc::Result<u64> {
-        self.stmt
-            .execute(to_my_params(params))
+        self.conn
+            .exec_iter(&self.stmt, to_my_params(params))
             .map_err(to_rdbc_err)
             .map(|result| result.affected_rows())
     }
 }
 
-pub struct MySQLResultSet<'a> {
-    result: my::QueryResult<'a>,
+pub struct MySQLResultSet<'c, 't, 'tc, T: my::prelude::Protocol> {
+    result: my::QueryResult<'c, 't, 'tc, T>,
     row: Option<my::Result<my::Row>>,
 }
 
@@ -137,11 +140,12 @@ macro_rules! impl_resultset_fns {
     }
 }
 
-impl<'a> rdbc::ResultSet for MySQLResultSet<'a> {
+impl<'c, 't, 'tc, T: my::prelude::Protocol> rdbc::ResultSet for MySQLResultSet<'c, 't, 'tc, T> {
     fn meta_data(&self) -> rdbc::Result<Box<dyn rdbc::ResultSetMetaData>> {
         let meta: Vec<rdbc::Column> = self
             .result
-            .columns_ref()
+            .columns()
+            .as_ref()
             .iter()
             .map(|c| rdbc::Column::new(&c.name_str(), to_rdbc_type(&c.column_type())))
             .collect();
@@ -203,41 +207,6 @@ fn to_my_value(v: &rdbc::Value) -> my::Value {
 /// Convert RDBC parameters to MySQL parameters
 fn to_my_params(params: &[rdbc::Value]) -> my::Params {
     my::Params::Positional(params.iter().map(|v| to_my_value(v)).collect())
-}
-
-fn rewrite(sql: &str, params: &[rdbc::Value]) -> rdbc::Result<String> {
-    let dialect = MySqlDialect {};
-    let mut tokenizer = Tokenizer::new(&dialect, sql);
-    tokenizer
-        .tokenize()
-        .and_then(|tokens| {
-            let mut i = 0;
-
-            let tokens: Vec<Token> = tokens
-                .iter()
-                .map(|t| match t {
-                    Token::Char(c) if *c == '?' => {
-                        let param = &params[i];
-                        i += 1;
-                        Token::Word(Word {
-                            value: param.to_string(),
-                            quote_style: None,
-                            keyword: "".to_owned(),
-                        })
-                    }
-                    _ => t.clone(),
-                })
-                .collect();
-
-            let sql = tokens
-                .iter()
-                .map(|t| format!("{}", t))
-                .collect::<Vec<String>>()
-                .join("");
-
-            Ok(sql)
-        })
-        .map_err(|e| rdbc::Error::General(format!("{:?}", e)))
 }
 
 #[cfg(test)]

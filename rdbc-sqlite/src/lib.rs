@@ -19,7 +19,7 @@
 //! ```
 
 use fallible_streaming_iterator::FallibleStreamingIterator;
-use rusqlite::Rows;
+use rusqlite::{params_from_iter, Rows};
 
 /// Convert a Sqlite error into an RDBC error
 fn to_rdbc_err(e: rusqlite::Error) -> rdbc::Error {
@@ -72,7 +72,10 @@ impl<'a> rdbc::Statement for SStatement<'a> {
         params: &[rdbc::Value],
     ) -> rdbc::Result<Box<dyn rdbc::ResultSet + '_>> {
         let params = Values(params);
-        let rows = self.stmt.query(&params).map_err(to_rdbc_err)?;
+        let rows = self
+            .stmt
+            .query(params_from_iter(params.into_iter()))
+            .map_err(to_rdbc_err)?;
         Ok(Box::new(SResultSet { rows }))
     }
 
@@ -80,7 +83,7 @@ impl<'a> rdbc::Statement for SStatement<'a> {
         let params = Values(params);
         return self
             .stmt
-            .execute(&params)
+            .execute(params_from_iter(params.into_iter()))
             .map_err(to_rdbc_err)
             .map(|n| n as u64);
     }
@@ -108,8 +111,9 @@ impl<'stmt> rdbc::ResultSet for SResultSet<'stmt> {
     fn meta_data(&self) -> rdbc::Result<Box<dyn rdbc::ResultSetMetaData>> {
         let meta: Vec<rdbc::Column> = self
             .rows
-            .columns()
+            .as_ref()
             .unwrap()
+            .columns()
             .iter()
             .map(|c| rdbc::Column::new(c.name(), to_rdbc_type(c.decl_type())))
             .collect();
@@ -157,9 +161,9 @@ impl<'a> IntoIterator for &'a Values<'a> {
 impl<'a> Iterator for ValuesIter<'a> {
     type Item = &'a dyn rusqlite::types::ToSql;
 
-    fn next(&mut self) -> Option<&'a dyn rusqlite::types::ToSql> {
+    fn next(&mut self) -> Option<Self::Item> {
         self.0.next().map(|v| match v {
-            rdbc::Value::String(ref s) => s as &dyn rusqlite::types::ToSql,
+            rdbc::Value::String(ref s) => s as Self::Item,
             rdbc::Value::Int32(ref n) => n as &dyn rusqlite::types::ToSql,
             rdbc::Value::UInt32(ref n) => n as &dyn rusqlite::types::ToSql,
         })

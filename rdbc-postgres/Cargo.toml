@@ -10,5 +10,5 @@ edition = "2018"
 [dependencies]
 rdbc = { path = "../rdbc", version = "0.1.6" }
 
-postgres = "0.15.2"
-sqlparser = "0.5.0"
+postgres = "0.19.5"
+sqlparser = "0.35.0"
