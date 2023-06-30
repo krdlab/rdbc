@@ -11,6 +11,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
     - uses: actions/checkout@v3
@@ -24,6 +25,13 @@ jobs:
       run: cargo build
 
     - name: Start database servers
-      run: docker-compose up -d
+      run: docker compose up -d --wait
+    - name: Wait until connecting to mysql-server is available
+      run: |
+        set -x
+        until mysqladmin --host 127.0.0.1 --port 3307 --user root -psecret status >/dev/null 2>&1; do
+            sleep 1
+        done
+
     - name: Run tests
       run: cargo test

@@ -8,6 +8,11 @@ services:
       - MYSQL_ROOT_PASSWORD=secret
     ports:
       - 3307:3306
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
   postgres:
     image: "postgres"
     #   Setup the username, password, and database name. You can changes these values.
