@@ -65,6 +65,19 @@ impl rdbc::Connection for MySQLConnection {
             stmt,
         }))
     }
+
+    fn commit(&mut self) -> rdbc::Result<()> {
+        self.conn.query_drop(r"COMMIT").map_err(to_rdbc_err)
+    }
+
+    fn rollback(&mut self) -> rdbc::Result<()> {
+        self.conn.query_drop(r"ROLLBACK").map_err(to_rdbc_err)
+    }
+
+    fn close(self) -> rdbc::Result<()> {
+        std::mem::drop(self); // TODO: is it correct?
+        Ok(())
+    }
 }
 
 struct MySQLStatement<'c> {

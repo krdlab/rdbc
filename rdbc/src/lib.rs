@@ -61,6 +61,12 @@ pub trait Connection {
 
     /// Create a prepared statement for execution
     fn prepare(&mut self, sql: &str) -> Result<Box<dyn Statement + '_>>;
+
+    fn commit(&mut self) -> Result<()>;
+
+    fn rollback(&mut self) -> Result<()>;
+
+    fn close(self) -> Result<()>;
 }
 
 /// Represents an executable statement

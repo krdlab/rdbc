@@ -60,6 +60,30 @@ impl rdbc::Connection for SConnection {
         let stmt = self.conn.prepare(sql).map_err(to_rdbc_err)?;
         Ok(Box::new(SStatement { stmt }))
     }
+
+    fn commit(&mut self) -> rdbc::Result<()> {
+        if self.conn.is_autocommit() {
+            return Err(rdbc::Error::General(
+                "database in auto-commit mode now".into(),
+            ));
+        }
+        let _ = self.conn.execute(r"commit", ()).map_err(to_rdbc_err)?;
+        Ok(())
+    }
+
+    fn rollback(&mut self) -> rdbc::Result<()> {
+        if self.conn.is_autocommit() {
+            return Err(rdbc::Error::General(
+                "database in auto-commit mode now".into(),
+            ));
+        }
+        let _ = self.conn.execute(r"rollback", ()).map_err(to_rdbc_err)?;
+        Ok(())
+    }
+
+    fn close(self) -> rdbc::Result<()> {
+        self.conn.close().map_err(|(_, e)| to_rdbc_err(e))
+    }
 }
 
 struct SStatement<'a> {

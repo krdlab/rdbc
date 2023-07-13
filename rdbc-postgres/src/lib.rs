@@ -88,6 +88,20 @@ impl rdbc::Connection for PConnection {
             sql,
         }))
     }
+
+    fn commit(&mut self) -> rdbc::Result<()> {
+        let _ = self.conn.query(r"COMMIT", &[]).map_err(to_rdbc_err)?;
+        Ok(())
+    }
+
+    fn rollback(&mut self) -> rdbc::Result<()> {
+        let _ = self.conn.query(r"ROLLBACK", &[]).map_err(to_rdbc_err)?;
+        Ok(())
+    }
+
+    fn close(self) -> rdbc::Result<()> {
+        self.conn.close().map_err(to_rdbc_err)
+    }
 }
 
 struct PStatement<'a> {
