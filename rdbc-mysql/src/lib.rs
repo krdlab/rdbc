@@ -160,7 +160,13 @@ impl<'c, 't, 'tc, T: my::prelude::Protocol> rdbc::ResultSet for MySQLResultSet<'
             .columns()
             .as_ref()
             .iter()
-            .map(|c| rdbc::Column::new(&c.name_str(), to_rdbc_type(&c.column_type())))
+            .map(|c| {
+                rdbc::Column::new(
+                    &c.name_str(),
+                    to_rdbc_type(&c.column_type()),
+                    c.column_length().into(),
+                )
+            })
             .collect();
         Ok(Box::new(meta))
     }

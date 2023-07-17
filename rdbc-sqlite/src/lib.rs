@@ -19,7 +19,7 @@
 //! ```
 
 use fallible_streaming_iterator::FallibleStreamingIterator;
-use rusqlite::{params_from_iter, Rows};
+use rusqlite::{params_from_iter, Column, Rows};
 
 /// Convert a Sqlite error into an RDBC error
 fn to_rdbc_err(e: rusqlite::Error) -> rdbc::Error {
@@ -139,7 +139,13 @@ impl<'stmt> rdbc::ResultSet for SResultSet<'stmt> {
             .unwrap()
             .columns()
             .iter()
-            .map(|c| rdbc::Column::new(c.name(), to_rdbc_type(c.decl_type())))
+            .map(|c| {
+                rdbc::Column::new(
+                    c.name(),
+                    to_rdbc_type(c.decl_type()),
+                    to_rdbc_display_size(c),
+                )
+            })
             .collect();
         Ok(Box::new(meta))
     }
@@ -169,6 +175,10 @@ fn to_rdbc_type(t: Option<&str>) -> rdbc::DataType {
         Some("INT") => rdbc::DataType::Integer,
         _ => rdbc::DataType::Utf8,
     }
+}
+
+fn to_rdbc_display_size(_: &Column) -> u64 {
+    10u64 // TODO
 }
 
 struct Values<'a>(&'a [rdbc::Value]);

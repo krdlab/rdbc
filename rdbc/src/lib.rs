@@ -101,6 +101,7 @@ pub trait ResultSetMetaData {
     fn num_columns(&self) -> u64;
     fn column_name(&self, i: u64) -> String;
     fn column_type(&self, i: u64) -> DataType;
+    fn column_display_size(&self, i: u64) -> u64;
 }
 
 /// RDBC Data Types
@@ -125,13 +126,15 @@ pub enum DataType {
 pub struct Column {
     name: String,
     data_type: DataType,
+    display_size: u64,
 }
 
 impl Column {
-    pub fn new(name: &str, data_type: DataType) -> Self {
+    pub fn new(name: &str, data_type: DataType, display_size: u64) -> Self {
         Column {
             name: name.to_owned(),
             data_type,
+            display_size,
         }
     }
 }
@@ -147,5 +150,9 @@ impl ResultSetMetaData for Vec<Column> {
 
     fn column_type(&self, i: u64) -> DataType {
         self[i as usize].data_type
+    }
+
+    fn column_display_size(&self, i: u64) -> u64 {
+        self[i as usize].display_size
     }
 }

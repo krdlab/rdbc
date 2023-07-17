@@ -25,7 +25,6 @@ use sqlparser::keywords::Keyword::NoKeyword;
 use sqlparser::tokenizer::{Token, Tokenizer, Word};
 
 use postgres::types::Type;
-use rdbc::Column;
 
 pub struct PostgresDriver {}
 
@@ -126,7 +125,13 @@ impl<'a> rdbc::Statement for PStatement<'a> {
             .map(|r| {
                 r.columns()
                     .iter()
-                    .map(|c| rdbc::Column::new(c.name(), to_rdbc_type(c.type_())))
+                    .map(|c| {
+                        rdbc::Column::new(
+                            c.name(),
+                            to_rdbc_type(c.type_()),
+                            to_rdbc_display_size(c.type_()),
+                        )
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -144,7 +149,7 @@ impl<'a> rdbc::Statement for PStatement<'a> {
 }
 
 struct PResultSet {
-    meta: Vec<Column>,
+    meta: Vec<rdbc::Column>,
     i: usize,
     rows: Vec<Row>,
 }
@@ -195,6 +200,15 @@ fn to_rdbc_type(ty: &Type) -> rdbc::DataType {
         "" => rdbc::DataType::Bool,
         //TODO all types
         _ => rdbc::DataType::Utf8,
+    }
+}
+
+// ref: https://github.com/pgjdbc/pgjdbc/blob/258cff34e32f8b5fe5d71f7553f7ac5f30690f85/pgjdbc/src/main/java/org/postgresql/jdbc/TypeInfoCache.java#L899
+fn to_rdbc_display_size(ty: &Type) -> u64 {
+    if ty.oid() == Type::INT4.oid() {
+        11
+    } else {
+        10 // TODO
     }
 }
 
