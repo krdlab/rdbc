@@ -111,6 +111,10 @@ impl<'a> rdbc::Statement for SStatement<'a> {
             .map_err(to_rdbc_err)
             .map(|n| n as u64);
     }
+
+    fn close(self) -> rdbc::Result<()> {
+        Ok(())
+    }
 }
 
 macro_rules! impl_resultset_fns {
@@ -166,6 +170,10 @@ impl<'stmt> rdbc::ResultSet for SResultSet<'stmt> {
         get_f64 -> f64,
         get_string -> String,
         get_bytes -> Vec<u8>
+    }
+
+    fn close(self) -> rdbc::Result<()> {
+        Ok(())
     }
 }
 

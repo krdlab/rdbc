@@ -76,6 +76,8 @@ pub trait Statement {
 
     /// Execute a query that is expected to update some rows.
     fn execute_update(&mut self, params: &[Value]) -> Result<u64>;
+
+    fn close(self) -> Result<()>;
 }
 
 /// Result set from executing a query against a statement
@@ -94,6 +96,8 @@ pub trait ResultSet {
     fn get_f64(&self, i: u64) -> Result<Option<f64>>;
     fn get_string(&self, i: u64) -> Result<Option<String>>;
     fn get_bytes(&self, i: u64) -> Result<Option<Vec<u8>>>;
+
+    fn close(self) -> Result<()>;
 }
 
 /// Meta data for result set

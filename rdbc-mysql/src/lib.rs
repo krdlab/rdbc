@@ -75,7 +75,6 @@ impl rdbc::Connection for MySQLConnection {
     }
 
     fn close(self) -> rdbc::Result<()> {
-        std::mem::drop(self); // TODO: is it correct?
         Ok(())
     }
 }
@@ -103,6 +102,10 @@ impl<'c> rdbc::Statement for MySQLStatement<'c> {
             .map_err(to_rdbc_err)
             .map(|result| result.affected_rows())
     }
+
+    fn close(self) -> rdbc::Result<()> {
+        Ok(())
+    }
 }
 
 struct MySQLPreparedStatement<'c> {
@@ -128,6 +131,10 @@ impl<'c> rdbc::Statement for MySQLPreparedStatement<'c> {
             .exec_iter(&self.stmt, to_my_params(params))
             .map_err(to_rdbc_err)
             .map(|result| result.affected_rows())
+    }
+
+    fn close(self) -> rdbc::Result<()> {
+        Ok(())
     }
 }
 
@@ -185,6 +192,10 @@ impl<'c, 't, 'tc, T: my::prelude::Protocol> rdbc::ResultSet for MySQLResultSet<'
         get_f64 -> f64,
         get_string -> String,
         get_bytes -> Vec<u8>
+    }
+
+    fn close(self) -> rdbc::Result<()> {
+        Ok(())
     }
 }
 

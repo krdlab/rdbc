@@ -146,6 +146,10 @@ impl<'a> rdbc::Statement for PStatement<'a> {
             .execute(&self.sql, params.as_slice())
             .map_err(to_rdbc_err)
     }
+
+    fn close(self) -> rdbc::Result<()> {
+        Ok(())
+    }
 }
 
 struct PResultSet {
@@ -187,6 +191,10 @@ impl rdbc::ResultSet for PResultSet {
         get_f64 -> f64,
         get_string -> String,
         get_bytes -> Vec<u8>
+    }
+
+    fn close(self) -> rdbc::Result<()> {
+        Ok(())
     }
 }
 
