@@ -10,9 +10,9 @@
 //! use rdbc_sqlite::SqliteDriver;
 //! let driver: Arc<dyn rdbc::Driver> = Arc::new(SqliteDriver::new());
 //! let mut conn = driver.connect("").unwrap();
-//! let stmt = conn.prepare("CREATE TABLE test (a INT NOT NULL)").unwrap().execute_update(&[]).unwrap();
-//! let stmt = conn.prepare("INSERT INTO test (a) VALUES (?)").unwrap().execute_update(&[rdbc::Value::Int32(123)]).unwrap();
-//! let mut stmt = conn.prepare("SELECT a FROM test").unwrap();
+//! let stmt = conn.prepare_statement("CREATE TABLE test (a INT NOT NULL)").unwrap().execute_update(&[]).unwrap();
+//! let stmt = conn.prepare_statement("INSERT INTO test (a) VALUES (?)").unwrap().execute_update(&[rdbc::Value::Int32(123)]).unwrap();
+//! let mut stmt = conn.prepare_statement("SELECT a FROM test").unwrap();
 //! let mut rs = stmt.execute_query(&[]).unwrap();
 //! assert!(rs.next());
 //! assert_eq!(Some(123), rs.get_i32(0).unwrap());
@@ -52,13 +52,19 @@ impl SConnection {
 }
 
 impl rdbc::Connection for SConnection {
-    fn create(&mut self, sql: &str) -> rdbc::Result<Box<dyn rdbc::Statement + '_>> {
-        self.prepare(sql)
+    fn create_statement(&mut self) -> rdbc::Result<Box<dyn rdbc::Statement + '_>> {
+        Ok(Box::new(SStatement {
+            conn: &mut self.conn,
+            stmt: None,
+        }))
     }
 
-    fn prepare(&mut self, sql: &str) -> rdbc::Result<Box<dyn rdbc::Statement + '_>> {
+    fn prepare_statement(
+        &mut self,
+        sql: &str,
+    ) -> rdbc::Result<Box<dyn rdbc::PreparedStatement + '_>> {
         let stmt = self.conn.prepare(sql).map_err(to_rdbc_err)?;
-        Ok(Box::new(SStatement { stmt }))
+        Ok(Box::new(SPreparedStatement { stmt }))
     }
 
     fn commit(&mut self) -> rdbc::Result<()> {
@@ -86,11 +92,47 @@ impl rdbc::Connection for SConnection {
     }
 }
 
-struct SStatement<'a> {
-    stmt: rusqlite::Statement<'a>,
+struct SStatement<'c> {
+    conn: &'c mut rusqlite::Connection,
+    stmt: Option<rusqlite::Statement<'c>>,
 }
 
-impl<'a> rdbc::Statement for SStatement<'a> {
+struct SPreparedStatement<'s> {
+    stmt: rusqlite::Statement<'s>,
+}
+
+impl<'c> rdbc::Statement for SStatement<'c> {
+    fn execute_query(
+        &mut self,
+        sql: &str,
+        params: &[rdbc::Value],
+    ) -> rdbc::Result<Box<dyn rdbc::ResultSet + '_>> {
+        // self.stmt = Some(self.conn.prepare(sql).map_err(to_rdbc_err)?);
+        // let params = Values(params);
+        // let rows = self
+        //     .stmt
+        //     .as_mut()
+        //     .unwrap()
+        //     .query(params_from_iter(params.into_iter()))
+        //     .map_err(to_rdbc_err)?;
+        // Ok(Box::new(SResultSet { rows }))
+        todo!()
+    }
+
+    fn execute_update(&mut self, sql: &str, params: &[rdbc::Value]) -> rdbc::Result<u64> {
+        let mut stmt = self.conn.prepare(sql).map_err(to_rdbc_err)?;
+        let params = Values(params);
+        stmt.execute(params_from_iter(params.into_iter()))
+            .map_err(to_rdbc_err)
+            .map(|n| n as u64)
+    }
+
+    fn close(self) -> rdbc::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'s> rdbc::PreparedStatement for SPreparedStatement<'s> {
     fn execute_query(
         &mut self,
         params: &[rdbc::Value],
@@ -100,16 +142,15 @@ impl<'a> rdbc::Statement for SStatement<'a> {
             .stmt
             .query(params_from_iter(params.into_iter()))
             .map_err(to_rdbc_err)?;
-        Ok(Box::new(SResultSet { rows }))
+        Ok(Box::new(SPreparedResultSet { rows }))
     }
 
     fn execute_update(&mut self, params: &[rdbc::Value]) -> rdbc::Result<u64> {
         let params = Values(params);
-        return self
-            .stmt
+        self.stmt
             .execute(params_from_iter(params.into_iter()))
             .map_err(to_rdbc_err)
-            .map(|n| n as u64);
+            .map(|n| n as u64)
     }
 
     fn close(self) -> rdbc::Result<()> {
@@ -132,10 +173,15 @@ macro_rules! impl_resultset_fns {
 }
 
 struct SResultSet<'stmt> {
+    // stmt: Box<rusqlite::Statement<'stmt>>,
     rows: Rows<'stmt>,
 }
 
-impl<'stmt> rdbc::ResultSet for SResultSet<'stmt> {
+struct SPreparedResultSet<'stmt> {
+    rows: Rows<'stmt>,
+}
+
+impl<'c, 'stmt> rdbc::ResultSet for SResultSet<'stmt> {
     fn meta_data(&self) -> rdbc::Result<Box<dyn rdbc::ResultSetMetaData>> {
         let meta: Vec<rdbc::Column> = self
             .rows
@@ -174,6 +220,45 @@ impl<'stmt> rdbc::ResultSet for SResultSet<'stmt> {
 
     fn close(self) -> rdbc::Result<()> {
         Ok(())
+    }
+}
+
+impl<'stmt> rdbc::ResultSet for SPreparedResultSet<'stmt> {
+    fn meta_data(&self) -> rdbc::Result<Box<dyn rdbc::ResultSetMetaData>> {
+        let meta: Vec<rdbc::Column> = self
+            .rows
+            .as_ref()
+            .unwrap()
+            .columns()
+            .iter()
+            .map(|c| {
+                rdbc::Column::new(
+                    c.name(),
+                    to_rdbc_type(c.decl_type()),
+                    to_rdbc_display_size(c),
+                )
+            })
+            .collect();
+        Ok(Box::new(meta))
+    }
+
+    fn next(&mut self) -> bool {
+        self.rows.next().unwrap().is_some()
+    }
+
+    impl_resultset_fns! {
+        get_i8 -> i8,
+        get_i16 -> i16,
+        get_i32 -> i32,
+        get_i64 -> i64,
+        get_f32 -> f32,
+        get_f64 -> f64,
+        get_string -> String,
+        get_bytes -> Vec<u8>
+    }
+
+    fn close(self) -> rdbc::Result<()> {
+        todo!()
     }
 }
 
@@ -231,7 +316,7 @@ mod tests {
             &vec![rdbc::Value::Int32(123)],
         )?;
 
-        let mut stmt = conn.prepare("SELECT a FROM test")?;
+        let mut stmt = conn.prepare_statement("SELECT a FROM test")?;
         let mut rs = stmt.execute_query(&vec![])?;
 
         let meta = rs.meta_data()?;
@@ -252,7 +337,7 @@ mod tests {
         values: &Vec<rdbc::Value>,
     ) -> rdbc::Result<u64> {
         println!("Executing '{}' with {} params", sql, values.len());
-        let mut stmt = conn.prepare(sql)?;
+        let mut stmt = conn.prepare_statement(sql)?;
         stmt.execute_update(values)
     }
 }

@@ -10,7 +10,7 @@
 //!
 //! let driver = MySQLDriver::new();
 //! let mut conn = driver.connect("mysql://root:password@localhost:3307/mysql").unwrap();
-//! let mut stmt = conn.prepare("SELECT a FROM b WHERE c = ?").unwrap();
+//! let mut stmt = conn.prepare_statement("SELECT a FROM b WHERE c = ?").unwrap();
 //! let mut rs = stmt.execute_query(&[Value::Int32(123)]).unwrap();
 //! while rs.next() {
 //!   println!("{:?}", rs.get_string(1));
@@ -51,14 +51,16 @@ struct MySQLConnection {
 }
 
 impl rdbc::Connection for MySQLConnection {
-    fn create(&mut self, sql: &str) -> rdbc::Result<Box<dyn rdbc::Statement + '_>> {
+    fn create_statement(&mut self) -> rdbc::Result<Box<dyn rdbc::Statement + '_>> {
         Ok(Box::new(MySQLStatement {
             conn: &mut self.conn,
-            sql: sql.to_owned(),
         }))
     }
 
-    fn prepare<'a>(&'a mut self, sql: &str) -> rdbc::Result<Box<dyn rdbc::Statement + '_>> {
+    fn prepare_statement<'a>(
+        &'a mut self,
+        sql: &str,
+    ) -> rdbc::Result<Box<dyn rdbc::PreparedStatement + '_>> {
         let stmt = self.conn.prep(&sql).map_err(to_rdbc_err)?;
         Ok(Box::new(MySQLPreparedStatement {
             conn: &mut self.conn,
@@ -81,24 +83,24 @@ impl rdbc::Connection for MySQLConnection {
 
 struct MySQLStatement<'c> {
     conn: &'c mut my::Conn,
-    sql: String,
 }
 
 impl<'c> rdbc::Statement for MySQLStatement<'c> {
     fn execute_query(
         &mut self,
+        sql: &str,
         params: &[rdbc::Value],
     ) -> rdbc::Result<Box<dyn rdbc::ResultSet + '_>> {
         let result = self
             .conn
-            .exec_iter(&self.sql, to_my_params(params))
+            .exec_iter(sql, to_my_params(params))
             .map_err(to_rdbc_err)?;
         Ok(Box::new(MySQLResultSet { result, row: None }))
     }
 
-    fn execute_update(&mut self, params: &[rdbc::Value]) -> rdbc::Result<u64> {
+    fn execute_update(&mut self, sql: &str, params: &[rdbc::Value]) -> rdbc::Result<u64> {
         self.conn
-            .exec_iter(&self.sql, to_my_params(params))
+            .exec_iter(sql, to_my_params(params))
             .map_err(to_rdbc_err)
             .map(|result| result.affected_rows())
     }
@@ -113,7 +115,7 @@ struct MySQLPreparedStatement<'c> {
     stmt: my::Statement,
 }
 
-impl<'c> rdbc::Statement for MySQLPreparedStatement<'c> {
+impl<'c> rdbc::PreparedStatement for MySQLPreparedStatement<'c> {
     fn execute_query(
         &mut self,
         params: &[rdbc::Value],
@@ -256,7 +258,7 @@ mod tests {
 
         let driver: Arc<dyn rdbc::Driver> = Arc::new(MySQLDriver::new());
         let mut conn = driver.connect("mysql://root:secret@127.0.0.1:3307/mysql")?;
-        let mut stmt = conn.prepare("SELECT a FROM test")?;
+        let mut stmt = conn.prepare_statement("SELECT a FROM test")?;
         let mut rs = stmt.execute_query(&vec![])?;
         assert!(rs.next());
         assert_eq!(Some(123), rs.get_i32(0)?);
@@ -269,7 +271,7 @@ mod tests {
         println!("Executing '{}' with {} params", sql, values.len());
         let driver: Arc<dyn rdbc::Driver> = Arc::new(MySQLDriver::new());
         let mut conn = driver.connect("mysql://root:secret@127.0.0.1:3307/mysql")?;
-        let mut stmt = conn.create(sql)?;
-        stmt.execute_update(values)
+        let mut stmt = conn.create_statement()?;
+        stmt.execute_update(sql, values)
     }
 }

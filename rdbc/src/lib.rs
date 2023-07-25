@@ -57,10 +57,10 @@ pub trait Driver: Sync + Send {
 /// Represents a connection to a database
 pub trait Connection {
     /// Create a statement for execution
-    fn create(&mut self, sql: &str) -> Result<Box<dyn Statement + '_>>;
+    fn create_statement(&mut self) -> Result<Box<dyn Statement + '_>>;
 
     /// Create a prepared statement for execution
-    fn prepare(&mut self, sql: &str) -> Result<Box<dyn Statement + '_>>;
+    fn prepare_statement(&mut self, sql: &str) -> Result<Box<dyn PreparedStatement + '_>>;
 
     fn commit(&mut self) -> Result<()>;
 
@@ -72,9 +72,17 @@ pub trait Connection {
 /// Represents an executable statement
 pub trait Statement {
     /// Execute a query that is expected to return a result set, such as a `SELECT` statement
-    fn execute_query(&mut self, params: &[Value]) -> Result<Box<dyn ResultSet + '_>>;
+    fn execute_query(&mut self, sql: &str, params: &[Value]) -> Result<Box<dyn ResultSet + '_>>;
 
     /// Execute a query that is expected to update some rows.
+    fn execute_update(&mut self, sql: &str, params: &[Value]) -> Result<u64>;
+
+    fn close(self) -> Result<()>;
+}
+
+pub trait PreparedStatement {
+    fn execute_query(&mut self, params: &[Value]) -> Result<Box<dyn ResultSet + '_>>;
+
     fn execute_update(&mut self, params: &[Value]) -> Result<u64>;
 
     fn close(self) -> Result<()>;

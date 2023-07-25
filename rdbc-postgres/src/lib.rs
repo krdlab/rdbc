@@ -10,7 +10,7 @@
 //!
 //! let driver = PostgresDriver::new();
 //! let mut conn = driver.connect("postgres://postgres:password@localhost:5433").unwrap();
-//! let mut stmt = conn.prepare("SELECT a FROM b WHERE c = ?").unwrap();
+//! let mut stmt = conn.prepare_statement("SELECT a FROM b WHERE c = ?").unwrap();
 //! let mut rs = stmt.execute_query(&[Value::Int32(123)]).unwrap();
 //! while rs.next() {
 //!   println!("{:?}", rs.get_string(1));
@@ -18,7 +18,7 @@
 //! ```
 
 use postgres::row::Row;
-use postgres::{Client, NoTls};
+use postgres::{Client, NoTls, Statement, ToStatement};
 
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::keywords::Keyword::NoKeyword;
@@ -52,39 +52,21 @@ impl PConnection {
 }
 
 impl rdbc::Connection for PConnection {
-    fn create(&mut self, sql: &str) -> rdbc::Result<Box<dyn rdbc::Statement + '_>> {
-        self.prepare(sql)
-    }
-
-    fn prepare(&mut self, sql: &str) -> rdbc::Result<Box<dyn rdbc::Statement + '_>> {
-        // translate SQL, mapping ? into $1 style bound param placeholder
-        let dialect = PostgreSqlDialect {};
-        let mut tokenizer = Tokenizer::new(&dialect, sql);
-        let tokens = tokenizer.tokenize().unwrap();
-        let mut i = 0;
-        let tokens: Vec<Token> = tokens
-            .iter()
-            .map(|t| match t {
-                Token::Placeholder(c) if *c == "?" => {
-                    i += 1;
-                    Token::Word(Word {
-                        value: format!("${}", i),
-                        quote_style: None,
-                        keyword: NoKeyword,
-                    })
-                }
-                _ => t.clone(),
-            })
-            .collect();
-        let sql = tokens
-            .iter()
-            .map(|t| format!("{}", t))
-            .collect::<Vec<String>>()
-            .join("");
-
+    fn create_statement(&mut self) -> rdbc::Result<Box<dyn rdbc::Statement + '_>> {
         Ok(Box::new(PStatement {
             conn: &mut self.conn,
-            sql,
+        }))
+    }
+
+    fn prepare_statement(
+        &mut self,
+        sql: &str,
+    ) -> rdbc::Result<Box<dyn rdbc::PreparedStatement + '_>> {
+        let sql = PStatement::replace_placeholder(sql);
+        let stmt = self.conn.prepare(&sql).map_err(to_rdbc_err)?;
+        Ok(Box::new(PgPreparedStatement {
+            conn: &mut self.conn,
+            stmt,
         }))
     }
 
@@ -105,21 +87,53 @@ impl rdbc::Connection for PConnection {
 
 struct PStatement<'a> {
     conn: &'a mut Client,
-    sql: String,
 }
 
-impl<'a> rdbc::Statement for PStatement<'a> {
-    fn execute_query(
-        &mut self,
+struct PgPreparedStatement<'a> {
+    conn: &'a mut Client,
+    stmt: Statement,
+}
+
+impl<'a> PStatement<'a> {
+    pub(crate) fn replace_placeholder(sql: &str) -> String {
+        // translate SQL, mapping ? into $1 style bound param placeholder
+        let dialect = PostgreSqlDialect {};
+        let mut tokenizer = Tokenizer::new(&dialect, sql);
+        let tokens = tokenizer.tokenize().unwrap();
+        let mut i = 0;
+        let tokens: Vec<Token> = tokens
+            .iter()
+            .map(|t| match t {
+                Token::Placeholder(c) if *c == "?" => {
+                    i += 1;
+                    Token::Word(Word {
+                        value: format!("${}", i),
+                        quote_style: None,
+                        keyword: NoKeyword,
+                    })
+                }
+                _ => t.clone(),
+            })
+            .collect();
+        tokens
+            .iter()
+            .map(|t| format!("{}", t))
+            .collect::<Vec<String>>()
+            .join("")
+    }
+
+    pub(crate) fn query<'r, T>(
+        conn: &mut Client,
+        sql: &T,
         params: &[rdbc::Value],
-    ) -> rdbc::Result<Box<dyn rdbc::ResultSet + '_>> {
+    ) -> rdbc::Result<Box<dyn rdbc::ResultSet + 'r>>
+    where
+        T: ?Sized + ToStatement,
+    {
         let params = to_postgres_value(params);
         let params: Vec<_> = params.iter().map(|v| v.as_ref()).collect();
 
-        let rows = self
-            .conn
-            .query(&self.sql, params.as_slice())
-            .map_err(to_rdbc_err)?;
+        let rows = conn.query(sql, params.as_slice()).map_err(to_rdbc_err)?;
         let meta = rows
             .first()
             .map(|r| {
@@ -138,12 +152,45 @@ impl<'a> rdbc::Statement for PStatement<'a> {
 
         Ok(Box::new(PResultSet { meta, i: 0, rows }))
     }
+}
+
+impl<'a> rdbc::Statement for PStatement<'a> {
+    fn execute_query(
+        &mut self,
+        sql: &str,
+        params: &[rdbc::Value],
+    ) -> rdbc::Result<Box<dyn rdbc::ResultSet + '_>> {
+        let sql = PStatement::replace_placeholder(sql);
+        PStatement::query(&mut self.conn, &sql, params)
+    }
+
+    fn execute_update(&mut self, sql: &str, params: &[rdbc::Value]) -> rdbc::Result<u64> {
+        let sql = PStatement::replace_placeholder(sql);
+        let params = to_postgres_value(params);
+        let params: Vec<_> = params.iter().map(|v| v.as_ref()).collect();
+        self.conn
+            .execute(&sql, params.as_slice())
+            .map_err(to_rdbc_err)
+    }
+
+    fn close(self) -> rdbc::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> rdbc::PreparedStatement for PgPreparedStatement<'a> {
+    fn execute_query(
+        &mut self,
+        params: &[rdbc::Value],
+    ) -> rdbc::Result<Box<dyn rdbc::ResultSet + '_>> {
+        PStatement::query(&mut self.conn, &self.stmt, params)
+    }
 
     fn execute_update(&mut self, params: &[rdbc::Value]) -> rdbc::Result<u64> {
         let params = to_postgres_value(params);
         let params: Vec<_> = params.iter().map(|v| v.as_ref()).collect();
         self.conn
-            .execute(&self.sql, params.as_slice())
+            .execute(&self.stmt, params.as_slice())
             .map_err(to_rdbc_err)
     }
 
@@ -249,7 +296,7 @@ mod tests {
 
         let driver: Arc<dyn rdbc::Driver> = Arc::new(PostgresDriver::new());
         let mut conn = driver.connect("postgres://rdbc:secret@127.0.0.1:5433")?;
-        let mut stmt = conn.prepare("SELECT a FROM test")?;
+        let mut stmt = conn.prepare_statement("SELECT a FROM test")?;
         let mut rs = stmt.execute_query(&vec![])?;
 
         assert!(rs.next());
@@ -263,7 +310,7 @@ mod tests {
         println!("Executing '{}' with {} params", sql, values.len());
         let driver: Arc<dyn rdbc::Driver> = Arc::new(PostgresDriver::new());
         let mut conn = driver.connect("postgres://rdbc:secret@127.0.0.1:5433")?;
-        let mut stmt = conn.prepare(sql)?;
+        let mut stmt = conn.prepare_statement(sql)?;
         stmt.execute_update(values)
     }
 }

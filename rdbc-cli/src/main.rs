@@ -74,8 +74,8 @@ fn main() -> Result<()> {
 
 fn execute(conn: &mut dyn Connection, sql: &str) -> Result<()> {
     println!("Executing {}", sql);
-    let mut stmt = conn.create(sql)?;
-    let mut rs = stmt.execute_query(&vec![])?;
+    let mut stmt = conn.create_statement()?;
+    let mut rs = stmt.execute_query(sql, &vec![])?;
     let meta = rs.meta_data()?;
 
     for i in 0..meta.num_columns() {
