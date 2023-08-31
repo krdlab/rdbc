@@ -14,7 +14,7 @@
 //! let stmt = conn.prepare_statement("INSERT INTO test (a) VALUES (?)").unwrap().execute_update(&[rdbc::Value::Int32(123)]).unwrap();
 //! let mut stmt = conn.prepare_statement("SELECT a FROM test").unwrap();
 //! let mut rs = stmt.execute_query(&[]).unwrap();
-//! assert!(rs.next());
+//! assert!(rs.next().unwrap());
 //! assert_eq!(Some(123), rs.get_i32(0).unwrap());
 //! ```
 
@@ -200,8 +200,11 @@ impl<'c, 'stmt> rdbc::ResultSet for SResultSet<'stmt> {
         Ok(Box::new(meta))
     }
 
-    fn next(&mut self) -> bool {
-        self.rows.next().unwrap().is_some()
+    fn next(&mut self) -> rdbc::Result<bool> {
+        match self.rows.next() {
+            Ok(n) => Ok(n.is_some()),
+            Err(e) => Err(rdbc::Error::General(e.to_string())),
+        }
     }
 
     fn get_f32(&self, _i: u64) -> rdbc::Result<Option<f32>> {
@@ -242,8 +245,11 @@ impl<'stmt> rdbc::ResultSet for SPreparedResultSet<'stmt> {
         Ok(Box::new(meta))
     }
 
-    fn next(&mut self) -> bool {
-        self.rows.next().unwrap().is_some()
+    fn next(&mut self) -> rdbc::Result<bool> {
+        match self.rows.next() {
+            Ok(n) => Ok(n.is_some()),
+            Err(e) => Err(rdbc::Error::General(e.to_string())),
+        }
     }
 
     impl_resultset_fns! {
@@ -324,9 +330,9 @@ mod tests {
         assert_eq!("a".to_owned(), meta.column_name(0));
         assert_eq!(DataType::Integer, meta.column_type(0));
 
-        assert!(rs.next());
+        assert!(rs.next().unwrap());
         assert_eq!(Some(123), rs.get_i32(0)?);
-        assert!(!rs.next());
+        assert!(!rs.next().unwrap());
 
         Ok(())
     }

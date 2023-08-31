@@ -12,7 +12,7 @@
 //! let mut conn = driver.connect("mysql://root:password@localhost:3307/mysql").unwrap();
 //! let mut stmt = conn.prepare_statement("SELECT a FROM b WHERE c = ?").unwrap();
 //! let mut rs = stmt.execute_query(&[Value::Int32(123)]).unwrap();
-//! while rs.next() {
+//! while rs.next().unwrap() {
 //!   println!("{:?}", rs.get_string(1));
 //! }
 //! ```
@@ -180,9 +180,9 @@ impl<'c, 't, 'tc, T: my::prelude::Protocol> rdbc::ResultSet for MySQLResultSet<'
         Ok(Box::new(meta))
     }
 
-    fn next(&mut self) -> bool {
+    fn next(&mut self) -> rdbc::Result<bool> {
         self.row = self.result.next();
-        self.row.is_some()
+        Ok(self.row.is_some())
     }
 
     impl_resultset_fns! {
@@ -260,9 +260,9 @@ mod tests {
         let mut conn = driver.connect("mysql://root:secret@127.0.0.1:3307/mysql")?;
         let mut stmt = conn.prepare_statement("SELECT a FROM test")?;
         let mut rs = stmt.execute_query(&vec![])?;
-        assert!(rs.next());
+        assert!(rs.next().unwrap());
         assert_eq!(Some(123), rs.get_i32(0)?);
-        assert!(!rs.next());
+        assert!(!rs.next().unwrap());
 
         Ok(())
     }

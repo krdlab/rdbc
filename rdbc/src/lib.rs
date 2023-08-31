@@ -14,7 +14,7 @@
 //! let mut conn = driver.connect("postgres://postgres:password@localhost:5433").unwrap();
 //! let mut stmt = conn.prepare("SELECT a FROM b WHERE c = ?").unwrap();
 //! let mut rs = stmt.execute_query(&[Value::Int32(123)]).unwrap();
-//! while rs.next() {
+//! while rs.next().unwrap() {
 //!   println!("{:?}", rs.get_string(1));
 //! }
 //! ```
@@ -94,7 +94,7 @@ pub trait ResultSet {
     fn meta_data(&self) -> Result<Box<dyn ResultSetMetaData>>;
 
     /// Move the cursor to the next available row if one exists and return true if it does
-    fn next(&mut self) -> bool;
+    fn next(&mut self) -> Result<bool>;
 
     fn get_i8(&self, i: u64) -> Result<Option<i8>>;
     fn get_i16(&self, i: u64) -> Result<Option<i16>>;

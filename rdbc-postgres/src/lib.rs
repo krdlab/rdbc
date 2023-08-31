@@ -12,7 +12,7 @@
 //! let mut conn = driver.connect("postgres://postgres:password@localhost:5433").unwrap();
 //! let mut stmt = conn.prepare_statement("SELECT a FROM b WHERE c = ?").unwrap();
 //! let mut rs = stmt.execute_query(&[Value::Int32(123)]).unwrap();
-//! while rs.next() {
+//! while rs.next().unwrap() {
 //!   println!("{:?}", rs.get_string(1));
 //! }
 //! ```
@@ -220,12 +220,12 @@ impl rdbc::ResultSet for PResultSet {
         Ok(Box::new(self.meta.clone()))
     }
 
-    fn next(&mut self) -> bool {
+    fn next(&mut self) -> rdbc::Result<bool> {
         if self.i < self.rows.len() {
             self.i = self.i + 1;
-            true
+            Ok(true)
         } else {
-            false
+            Ok(false)
         }
     }
 
@@ -299,9 +299,9 @@ mod tests {
         let mut stmt = conn.prepare_statement("SELECT a FROM test")?;
         let mut rs = stmt.execute_query(&vec![])?;
 
-        assert!(rs.next());
+        assert!(rs.next().unwrap());
         assert_eq!(Some(123), rs.get_i32(0)?);
-        assert!(!rs.next());
+        assert!(!rs.next().unwrap());
 
         Ok(())
     }
