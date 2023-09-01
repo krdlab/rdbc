@@ -148,7 +148,7 @@ pub struct MySQLResultSet<'c, 't, 'tc, T: my::prelude::Protocol> {
 macro_rules! impl_resultset_fns {
     ($($fn: ident -> $ty: ty),*) => {
         $(
-            fn $fn(&self, i: u64) -> rdbc::Result<Option<$ty>> {
+            fn $fn(&mut self, i: u64) -> rdbc::Result<Option<$ty>> {
                 match &self.row {
                     Some(Ok(row)) => row
                         .get_opt(i as usize)

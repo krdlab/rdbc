@@ -208,7 +208,7 @@ struct PResultSet {
 macro_rules! impl_resultset_fns {
     ($($fn: ident -> $ty: ty),*) => {
         $(
-            fn $fn(&self, i: u64) -> rdbc::Result<Option<$ty>> {
+            fn $fn(&mut self, i: u64) -> rdbc::Result<Option<$ty>> {
                 Ok(self.rows.get(self.i - 1).map(|r| r.get(i as usize)))
             }
         )*

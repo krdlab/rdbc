@@ -161,7 +161,7 @@ impl<'s> rdbc::PreparedStatement for SPreparedStatement<'s> {
 macro_rules! impl_resultset_fns {
     ($($fn: ident -> $ty: ty),*) => {
         $(
-            fn $fn(&self, i: u64) -> rdbc::Result<Option<$ty>> {
+            fn $fn(&mut self, i: u64) -> rdbc::Result<Option<$ty>> {
                 self.rows
                     .get()
                     .unwrap()
@@ -207,7 +207,7 @@ impl<'c, 'stmt> rdbc::ResultSet for SResultSet<'stmt> {
         }
     }
 
-    fn get_f32(&self, _i: u64) -> rdbc::Result<Option<f32>> {
+    fn get_f32(&mut self, _i: u64) -> rdbc::Result<Option<f32>> {
         Err(rdbc::Error::General("f32 not supported".to_owned()))
     }
 

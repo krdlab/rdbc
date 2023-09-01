@@ -96,14 +96,14 @@ pub trait ResultSet {
     /// Move the cursor to the next available row if one exists and return true if it does
     fn next(&mut self) -> Result<bool>;
 
-    fn get_i8(&self, i: u64) -> Result<Option<i8>>;
-    fn get_i16(&self, i: u64) -> Result<Option<i16>>;
-    fn get_i32(&self, i: u64) -> Result<Option<i32>>;
-    fn get_i64(&self, i: u64) -> Result<Option<i64>>;
-    fn get_f32(&self, i: u64) -> Result<Option<f32>>;
-    fn get_f64(&self, i: u64) -> Result<Option<f64>>;
-    fn get_string(&self, i: u64) -> Result<Option<String>>;
-    fn get_bytes(&self, i: u64) -> Result<Option<Vec<u8>>>;
+    fn get_i8(&mut self, i: u64) -> Result<Option<i8>>;
+    fn get_i16(&mut self, i: u64) -> Result<Option<i16>>;
+    fn get_i32(&mut self, i: u64) -> Result<Option<i32>>;
+    fn get_i64(&mut self, i: u64) -> Result<Option<i64>>;
+    fn get_f32(&mut self, i: u64) -> Result<Option<f32>>;
+    fn get_f64(&mut self, i: u64) -> Result<Option<f64>>;
+    fn get_string(&mut self, i: u64) -> Result<Option<String>>;
+    fn get_bytes(&mut self, i: u64) -> Result<Option<Vec<u8>>>;
 
     fn close(self) -> Result<()>;
 }
